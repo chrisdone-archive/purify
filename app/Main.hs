@@ -157,9 +157,3 @@ purify inputFiles config = do
             _ -> putStrLn ("Output bundled to " ++ outputFile config)
   where
     getDepDir dep = ".purify-work/extra-deps/" ++ depName dep
-
--- find $(for i in $(ls ../upstream/ | grep ^purescript-); do echo ../upstream/$i/src; done)  -name '*.purs'
--- (xargs stack exec -- psc -o .stack-work/ps-output 2>/dev/stdout 1>/dev/null) > out.txt &&
--- stack exec -- psc-bundle .stack-work/ps-output/**/*.js -m Main --main Main -o static/js/index.js
-
---  app/Main.purs .stack-work/ps-gen/SharedTypes.purs .stack-work/ps-gen/Servant.purs

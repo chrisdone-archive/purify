@@ -9,6 +9,7 @@ import Data.Aeson
 import Data.Char
 import Data.Function
 import Data.List
+import Data.Maybe
 import Data.Yaml
 import System.Directory
 import System.Environment
@@ -31,6 +32,7 @@ data Dep = Dep
   { depRepo :: String
   , depCommit :: String
   , depName :: String
+  , depModules :: Maybe [String]
   } deriving (Eq,Show)
 
 instance FromJSON Dep where
@@ -39,7 +41,8 @@ instance FromJSON Dep where
     repo <- o .: "repo"
     commit <- o .: "commit"
     let name = takeWhile (/='.') (reverse (takeWhile (/='/') (reverse repo)))
-    pure (Dep repo commit name)
+    mmodules <- o .:? "modules"
+    pure (Dep repo commit name mmodules)
 
 main :: IO ()
 main = do
@@ -127,9 +130,26 @@ purify inputFiles config = do
            "There is no src/ directory in this project. Please create one and put your PureScript files in there."
     else do
       let args =
-            map (++ "/src") ("." : map getDepDir (extraDeps config)) ++
+            map
+              (++ "/src")
+              ("." :
+               map
+                 getDepDir
+                 (filter (isNothing . depModules) (extraDeps config))) ++
             ["-name", "*.purs"]
-      allPurs <- fmap (++ inputFiles) (fmap lines (readProcess "find" args ""))
+      foundPurs <- fmap lines (readProcess "find" args "")
+      let explicitPurs =
+            concat
+              (mapMaybe
+                 (\dep -> do
+                    modules <- depModules dep
+                    pure (map (\modn -> getDepDir dep ++ "/" ++ topath modn) modules))
+                 (extraDeps config))
+            where topath m = "src/" ++ replace m ++ ".purs"
+                  replace ('.':cs) = '/' : replace cs
+                  replace (c:cs) = c : replace cs
+                  replace [] = []
+      let allPurs = inputFiles ++ foundPurs ++ explicitPurs
       putStrLn ("Compiling " ++ show (length allPurs) ++ " modules ...")
       let outputDir = ".purify-work/js-output"
       status <-

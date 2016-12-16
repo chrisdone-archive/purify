@@ -3,7 +3,6 @@
 
 module Main where
 
-import Control.Exception
 import Control.Monad
 import Data.Aeson
 import Data.Char
@@ -48,12 +47,12 @@ main :: IO ()
 main = do
   exists <- doesFileExist "purify.yaml"
   if not exists
-    then error
+    then die
            "Expected purify.yaml in the directory of your PureScript project."
     else do
       result <- decodeFileEither "purify.yaml"
       case result of
-        Left e -> error (displayException e)
+        Left _ -> die "Couldn't parse purify.yaml file."
         Right config -> do
           files <- fmap (filter (not . isPrefixOf "-")) getArgs
           purify files config
@@ -66,7 +65,7 @@ purify inputFiles config = do
   when
     (nub (extraDeps config) /= extraDeps config ||
      nubBy (on (==) depName) (extraDeps config) /= extraDeps config)
-    (error "Dependencies contain duplicates.")
+    (die "Dependencies contain duplicates.")
   mapM_
     (\dep -> do
        let depDir = getDepDir dep
@@ -79,19 +78,29 @@ purify inputFiles config = do
                  ok <- rawSystem "git" ["clone", "-q", depRepo dep, depDir]
                  case ok of
                    ExitFailure {} ->
-                     error
+                     die
                        ("Failed to clone package " ++
                         depName dep ++ " from " ++ depRepo dep)
                    _ -> checkout
                else checkout
            checkout = do
-             cur <- readProcess "git" ["-C", gitDir, "rev-parse", "HEAD"] ""
-             let commit = takeWhile isAlphaNum cur
-                 shortDepCommit = take 7 (depCommit dep)
-             if commit == depCommit dep
+             tags <-
+               fmap
+                 lines
+                 (readProcess
+                    "git"
+                    ["-C", gitDir, "tag", "--points-at", "HEAD"]
+                    "")
+             if any (== depCommit dep) tags
                then return ()
                else do
-                 fetch shortDepCommit Didn'tFetch
+                 cur <- readProcess "git" ["-C", gitDir, "rev-parse", "HEAD"] ""
+                 let commit = takeWhile isAlphaNum cur
+                     shortDepCommit = take 7 (depCommit dep)
+                 if commit == depCommit dep
+                   then return ()
+                   else do
+                     fetch shortDepCommit Didn'tFetch
            fetch shortDepCommit fetchState = do
              case fetchState of
                Didn'tFetch ->
@@ -112,13 +121,13 @@ purify inputFiles config = do
                      fres <- rawSystem "git" ["-C", gitDir, "fetch", "-q"]
                      case fres of
                        ExitFailure {} ->
-                         error
+                         die
                            ("Tried to checkout " ++
                             depCommit dep ++
                             ", but it failed. Tried to fetch from the remote, but that failed too. Giving up.")
                        _ -> fetch shortDepCommit Fetched
                    Fetched ->
-                     error
+                     die
                        ("Checking out version failed for " ++
                         depName dep ++ ": " ++ depCommit dep)
                _ -> return ()
@@ -126,7 +135,7 @@ purify inputFiles config = do
     (extraDeps config)
   srcExists <- doesDirectoryExist "src/"
   if not srcExists
-    then error
+    then die
            "There is no src/ directory in this project. Please create one and put your PureScript files in there."
     else do
       let args =
@@ -143,26 +152,28 @@ purify inputFiles config = do
               (mapMaybe
                  (\dep -> do
                     modules <- depModules dep
-                    pure (map (\modn -> getDepDir dep ++ "/" ++ topath modn) modules))
+                    pure
+                      (map
+                         (\modn -> getDepDir dep ++ "/" ++ topath modn)
+                         modules))
                  (extraDeps config))
-            where topath m = "src/" ++ replace m ++ ".purs"
-                  replace ('.':cs) = '/' : replace cs
-                  replace (c:cs) = c : replace cs
-                  replace [] = []
+            where
+              topath m = "src/" ++ replace m ++ ".purs"
+              replace ('.':cs) = '/' : replace cs
+              replace (c:cs) = c : replace cs
+              replace [] = []
       let allPurs = inputFiles ++ foundPurs ++ explicitPurs
       putStrLn ("Compiling " ++ show (length allPurs) ++ " modules ...")
       let outputDir = ".purify-work/js-output"
-      status <-
-        rawSystem "psc" (["-o", outputDir] ++ allPurs)
+      status <- rawSystem "psc" (["-o", outputDir] ++ allPurs)
       case status of
-        ExitFailure {} -> error "Compile failed."
+        ExitFailure {} -> die "Compile failed."
         _ -> do
           putStrLn "Bundling ..."
           stat <-
             rawSystem
               "psc-bundle"
-              [ ""
-              , ".purify-work/js-output/**/*.js"
+              [ ".purify-work/js-output/**/*.js"
               , "-m"
               , "Main"
               , "--main"
@@ -171,7 +182,7 @@ purify inputFiles config = do
               , outputFile config
               ]
           case stat of
-            ExitFailure {} -> error "Bundling failed."
+            ExitFailure {} -> die "Bundling failed."
             _ -> putStrLn ("Output bundled to " ++ outputFile config)
   where
     getDepDir dep = ".purify-work/extra-deps/" ++ depName dep

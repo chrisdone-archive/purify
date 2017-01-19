@@ -13,7 +13,6 @@ import Data.Yaml
 import System.Directory
 import System.Environment
 import System.Exit
-import qualified System.FilePath.Glob as Glob
 import System.Process
 
 data Purify = Purify
@@ -139,15 +138,15 @@ purify inputFiles config = do
     then die
            "There is no src/ directory in this project. Please create one and put your PureScript files in there."
     else do
-      let pattern = Glob.compile "**/*.purs"
-      let dirs =
+      let args =
             map
               (++ "/src")
               ("." :
                map
                  getDepDir
-                 (filter (isNothing . depModules) (extraDeps config)))
-      foundPurs <- concat <$> mapM (Glob.globDir1 pattern) dirs
+                 (filter (isNothing . depModules) (extraDeps config))) ++
+            ["-name", "*.purs"]
+      foundPurs <- fmap lines (readProcess "find" args "")
       let explicitPurs =
             concat
               (mapMaybe

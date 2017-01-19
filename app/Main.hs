@@ -148,7 +148,6 @@ purify inputFiles config = do
                  getDepDir
                  (filter (isNothing . depModules) (extraDeps config)))
       foundPurs <- concat <$> mapM (Glob.globDir1 pattern) dirs
-      foundPurs <- fmap lines (readProcess "find" args "")
       let explicitPurs =
             concat
               (mapMaybe

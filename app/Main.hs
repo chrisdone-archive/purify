@@ -48,15 +48,22 @@ main :: IO ()
 main = do
   exists <- doesFileExist "purify.yaml"
   if not exists
-    then die
-           "Expected purify.yaml in the directory of your PureScript project."
+    then die "Expected purify.yaml in the directory of your PureScript project."
     else do
       result <- decodeFileEither "purify.yaml"
       case result of
         Left _ -> die "Couldn't parse purify.yaml file."
         Right config -> do
-          files <- fmap (filter (not . isPrefixOf "-")) getArgs
-          purify files config
+          command <- getArgs
+          case command of
+            [] -> purify [] config
+            ["build"] -> purify [] config
+            ["ide"] -> do
+              void (rawSystem
+                      "psc-ide-server"
+                      ["--output-directory", ".purify-work/js-output"])
+              pure ()
+            _ -> error "Unknown command"
 
 data FetchState = Didn'tFetch | Fetched
 

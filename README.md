@@ -7,3 +7,10 @@ for a template repo that you can clone and build in 5 minutes.
 
 See [purify-sets](https://github.com/chrisdone/purify-sets)
 for sets of packages that are known to build together.
+
+## Commands
+
+* `purify build` - Build the current project.
+* `purify ide` - Launch the PureScript IDE server (for Emacs integration).
+
+See examples of these commands at [purify-template](https://github.com/chrisdone/purify-template).

@@ -15,6 +15,7 @@ import System.Environment
 import System.Exit
 import qualified System.FilePath.Glob as Glob
 import System.Process
+import qualified Data.Map as Map
 
 data Purify = Purify
   { outputFile :: FilePath
@@ -25,7 +26,8 @@ instance FromJSON Purify where
   parseJSON j = do
     o <- parseJSON j
     outputFile <- o .: "output-file"
-    extraDeps <- o .: "extra-deps"
+    extraDeps' <- o .: "extra-deps"
+    let extraDeps = Map.elems (extraDeps' :: Map.Map String Dep)
     pure (Purify {..})
 
 data Dep = Dep

@@ -17,5 +17,5 @@ executable purify
   hs-source-dirs:      app
   main-is:             Main.hs
   ghc-options:         -Wall -threaded -O
-  build-depends:       base, yaml, aeson, directory, process, Glob
+  build-depends:       base, yaml, aeson, directory, process, Glob, containers
   default-language:    Haskell2010

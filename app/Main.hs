@@ -174,15 +174,16 @@ purify inputFiles config = do
       let allPurs = inputFiles ++ foundPurs ++ explicitPurs
       putStrLn ("Compiling " ++ show (length allPurs) ++ " modules ...")
       let outputDir = ".purify-work/js-output"
-      status <- rawSystem "psc" (["-o", outputDir] ++ allPurs)
+      status <- rawSystem "purs" (["compile", "-o", outputDir] ++ allPurs)
       case status of
         ExitFailure {} -> die "Compile failed."
         _ -> do
           putStrLn "Bundling ..."
           stat <-
             rawSystem
-              "psc-bundle"
-              [ ".purify-work/js-output/**/*.js"
+              "purs"
+              [ "bundle"
+              , ".purify-work/js-output/**/*.js"
               , "-m"
               , "Main"
               , "--main"

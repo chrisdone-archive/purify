@@ -64,8 +64,8 @@ main = do
             ["build"] -> purify [] config
             ["ide"] -> do
               void (rawSystem
-                      "psc-ide-server"
-                      ["--output-directory", ".purify-work/js-output"
+                      "purs"
+                      ["ide","server", "--output-directory", ".purify-work/js-output"
                       ,".purify-work/extra-deps/*/src/**/*.purs", "src/**/*.purs"])
               pure ()
             _ -> error "Unknown command"

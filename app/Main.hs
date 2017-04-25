@@ -3,19 +3,20 @@
 
 module Main where
 
-import Control.Monad
-import Data.Aeson
-import Data.Char
-import Data.Function
-import Data.List
-import Data.Maybe
-import Data.Yaml
-import System.Directory
-import System.Environment
-import System.Exit
-import qualified System.FilePath.Glob as Glob
-import System.Process
+import           Control.Applicative
+import           Control.Monad
+import           Data.Aeson
+import           Data.Char
+import           Data.Function
+import           Data.List
 import qualified Data.Map as Map
+import           Data.Maybe
+import           Data.Yaml
+import           System.Directory
+import           System.Environment
+import           System.Exit
+import qualified System.FilePath.Glob as Glob
+import           System.Process
 
 data Purify = Purify
   { outputFile :: FilePath
@@ -26,8 +27,9 @@ instance FromJSON Purify where
   parseJSON j = do
     o <- parseJSON j
     outputFile <- o .: "output-file"
-    extraDeps' <- o .: "extra-deps"
-    let extraDeps = Map.elems (extraDeps' :: Map.Map String Dep)
+    extraDeps <-
+      ((o .: "extra-deps") <|> {-backwards compat-}
+       fmap (Map.elems :: Map.Map String Dep -> [Dep]) (o .: "extra-deps"))
     pure (Purify {..})
 
 data Dep = Dep

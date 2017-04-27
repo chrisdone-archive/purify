@@ -5,6 +5,8 @@ module Main where
 
 import           Control.Applicative
 import           Control.Monad
+import           Control.Monad.IO.Class
+import           Control.Monad.Trans.State.Strict
 import           Data.Aeson
 import           Data.Char
 import           Data.Function
@@ -12,6 +14,7 @@ import           Data.List
 import qualified Data.Map as Map
 import           Data.Maybe
 import           Data.Yaml
+import           PackageInfo
 import           System.Directory
 import           System.Environment
 import           System.Exit
@@ -23,30 +26,51 @@ data Purify = Purify
   , extraDeps :: [Dep]
   } deriving (Eq,Show)
 
+instance ToJSON Purify where
+  toJSON (Purify outFile deps) = object
+    [ "output-file" .= outFile
+    , "extra-deps" .= deps
+    ]
+
 instance FromJSON Purify where
   parseJSON j = do
     o <- parseJSON j
     outputFile <- o .: "output-file"
     extraDeps <-
-      ((o .: "extra-deps") <|> {-backwards compat-}
-       fmap (Map.elems :: Map.Map String Dep -> [Dep]) (o .: "extra-deps"))
+      ((o .: "extra-deps") <|>
+       fmap flattenDeps (o .: "extra-deps")) {-backwards compat-}
     pure (Purify {..})
+    where
+      flattenDeps :: Map.Map String Dep -> [Dep]
+      flattenDeps = map (\(k, v) -> v { depName = k }) . Map.toList
 
 data Dep = Dep
   { depRepo :: String
   , depCommit :: String
   , depName :: String
   , depModules :: Maybe [String]
+  , depDeps :: [String]
   } deriving (Eq,Show)
+
+instance ToJSON Dep where
+  toJSON d = object
+    (maybe id (\m -> (("modules" .= m):)) (depModules d)
+    [ "repo" .= depRepo d
+    , "commit" .= depCommit d
+    , "name" .= depName d
+    , "deps" .= depDeps d
+    ])
 
 instance FromJSON Dep where
   parseJSON j = do
     o <- parseJSON j
     repo <- o .: "repo"
     commit <- o .: "commit"
-    let name = takeWhile (/='.') (reverse (takeWhile (/='/') (reverse repo)))
+    let name' = takeWhile (/='.') (reverse (takeWhile (/='/') (reverse repo)))
+    name <- o .:? "name" .!= name'
     mmodules <- o .:? "modules"
-    pure (Dep repo commit name mmodules)
+    deps <- o .:? "deps" .!= []
+    pure (Dep repo commit name mmodules deps)
 
 main :: IO ()
 main = do
@@ -68,6 +92,7 @@ main = do
                       ["ide","server", "--output-directory", ".purify-work/js-output"
                       ,".purify-work/extra-deps/*/src/**/*.purs", "src/**/*.purs"])
               pure ()
+            "add-deps":newDeps -> addDeps config newDeps
             _ -> error "Unknown command"
 
 data FetchState = Didn'tFetch | Fetched
@@ -200,3 +225,35 @@ purify inputFiles config = do
             _ -> putStrLn ("Output bundled to " ++ outputFile config)
   where
     getDepDir dep = ".purify-work/extra-deps/" ++ depName dep
+
+addDeps :: Purify -> [String] -> IO ()
+addDeps (Purify outFile deps) newDeps =
+  void (runStateT (mapM_ (addDep outFile []) newDeps) depsMap)
+  where
+  depsMap = Map.unions (map (\dep -> Map.singleton (depName dep) dep) deps)
+
+addDep :: FilePath -- ^ out file
+       -> [String] -- ^ call stack, to avoid cycles
+       -> String -- ^ new dep
+       -> StateT (Map.Map String Dep) IO ()
+addDep _ depStack newDep
+  | newDep `elem` depStack = error ("Dep cycle detected: " ++ show (newDep : depStack))
+addDep outFile depStack newDep = do
+  let newStack = newDep : depStack
+  allDeps <- get
+  case Map.lookup newDep allDeps of
+    Nothing -> do
+      liftIO (putStrLn ("Adding dep: " ++ newDep))
+      (repo, deps) <- liftIO (lookupPackage newDep)
+      master <- liftIO (getMasterCommit repo)
+      modify (Map.insert newDep (Dep
+        { depRepo = repo
+        , depCommit = master
+        , depName = newDep
+        , depModules = Nothing
+        , depDeps = deps
+        }))
+      deps' <- get
+      liftIO (encodeFile "purify.yaml" (Purify outFile (Map.elems deps')))
+      mapM_ (addDep outFile newStack) deps
+    Just ed -> mapM_ (addDep outFile newStack) (depDeps ed)

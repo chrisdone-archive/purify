@@ -1,9 +1,12 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TemplateHaskell #-}
 
 module Main where
 
 import           Control.Applicative
+import           Control.Concurrent.STM
+import           Control.Exception.Safe
 import           Control.Monad
 import           Control.Monad.IO.Class
 import           Control.Monad.Trans.State.Strict
@@ -13,12 +16,16 @@ import           Data.Function
 import           Data.List
 import qualified Data.Map as Map
 import           Data.Maybe
+import           Data.Monoid
 import           Data.Yaml
+import           Options.Applicative.Simple
 import           PackageInfo
+import qualified Paths_purify
 import           System.Directory
 import           System.Environment
 import           System.Exit
 import qualified System.FilePath.Glob as Glob
+import qualified System.FSNotify as FS
 import           System.Process
 
 data Purify = Purify
@@ -82,23 +89,27 @@ main = do
       case result of
         Left _ -> die "Couldn't parse purify.yaml file."
         Right config -> do
-          command <- getArgs
-          case command of
-            [] -> purify [] config
-            ["build"] -> purify [] config
-            ["ide"] -> do
-              void (rawSystem
-                      "purs"
-                      ["ide","server", "--output-directory", ".purify-work/js-output"
-                      ,".purify-work/extra-deps/*/src/**/*.purs", "src/**/*.purs"])
-              pure ()
-            "add-deps":newDeps -> addDeps config newDeps
-            _ -> error "Unknown command"
+          args <- getArgs
+          if null args
+            then purify [] config False
+            else join $ fmap snd $ simpleOptions
+              $(simpleVersion Paths_purify.version)
+              "purify build tool for PureScript"
+              "Fully reproducible builds for PureScript"
+              (pure ()) $ do
+              addCommand "build" "Build code" id $ purify
+                  <$> pure []
+                  <*> pure config
+                  <*> switch (long "file-watch" <> help "Auto-rebuild on file change")
+              addCommand "ide" "Launch IDE interaction" id $ pure ide
+              addCommand "add-deps" "Add dependencies to purify.yaml" id $ addDeps
+                  <$> pure config
+                  <*> some (strArgument (metavar "PACKAGE-NAME"))
 
 data FetchState = Didn'tFetch | Fetched
 
-purify :: [FilePath] -> Purify -> IO ()
-purify inputFiles config = do
+purify :: [FilePath] -> Purify -> Bool -> IO ()
+purify inputFiles config fileWatch = do
   createDirectoryIfMissing True ".purify-work/extra-deps"
   when
     (nub (extraDeps config) /= extraDeps config ||
@@ -176,7 +187,6 @@ purify inputFiles config = do
     then die
            "There is no src/ directory in this project. Please create one and put your PureScript files in there."
     else do
-      let pattern = Glob.compile "**/*.purs"
       let dirs =
             map
               (++ "/src")
@@ -184,6 +194,38 @@ purify inputFiles config = do
                map
                  getDepDir
                  (filter (isNothing . depModules) (extraDeps config)))
+          buildCmd = purifyDirs inputFiles config dirs
+      if fileWatch
+        then watchDirs dirs buildCmd
+        else buildCmd
+
+watchDirs :: [FilePath] -> IO () -> IO ()
+watchDirs dirs inner = do
+  toRunVar <- newTVarIO True -- do an initial build immediately
+  FS.withManager (\manager -> do
+    forM_ dirs $ \dir -> FS.watchTree manager dir (const True)
+      (const (atomically (writeTVar toRunVar True)))
+    forever (do
+      atomically (do
+        toRun <- readTVar toRunVar
+        check toRun
+        writeTVar toRunVar False)
+      putStrLn "Starting build"
+      eres <- tryAny inner
+      case eres of
+        Left e -> print e
+        Right () -> return ()
+      putStrLn "Build command finished, waiting for file changes"))
+
+getDepDir :: Dep -> FilePath
+getDepDir dep = ".purify-work/extra-deps/" ++ depName dep
+
+purifyDirs :: [FilePath]
+           -> Purify
+           -> [FilePath]
+           -> IO ()
+purifyDirs inputFiles config dirs = do
+      let pattern = Glob.compile "**/*.purs"
       foundPurs <- concat <$> mapM (Glob.globDir1 pattern) dirs
       let explicitPurs =
             concat
@@ -223,8 +265,13 @@ purify inputFiles config = do
           case stat of
             ExitFailure {} -> die "Bundling failed."
             _ -> putStrLn ("Output bundled to " ++ outputFile config)
-  where
-    getDepDir dep = ".purify-work/extra-deps/" ++ depName dep
+
+ide :: IO ()
+ide = rawSystem
+  "purs"
+  ["ide","server", "--output-directory", ".purify-work/js-output"
+  ,".purify-work/extra-deps/*/src/**/*.purs", "src/**/*.purs"]
+  >>= exitWith
 
 addDeps :: Purify -> [String] -> IO ()
 addDeps (Purify outFile deps) newDeps =

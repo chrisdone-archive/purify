@@ -22,10 +22,14 @@ executable purify
                      , aeson
                      , containers
                      , directory
+                     , fsnotify
                      , Glob
                      , html-conduit
                      , http-conduit
+                     , optparse-simple
                      , process
+                     , safe-exceptions
+                     , stm
                      , text
                      , transformers
                      , xml-conduit

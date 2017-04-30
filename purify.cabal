@@ -25,6 +25,7 @@ executable purify
                      , Glob
                      , html-conduit
                      , http-conduit
+                     , optparse-simple
                      , process
                      , text
                      , transformers

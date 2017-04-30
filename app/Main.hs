@@ -1,5 +1,6 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TemplateHaskell #-}
 
 module Main where
 
@@ -14,9 +15,10 @@ import           Data.List
 import qualified Data.Map as Map
 import           Data.Maybe
 import           Data.Yaml
+import           Options.Applicative.Simple
 import           PackageInfo
+import qualified Paths_purify
 import           System.Directory
-import           System.Environment
 import           System.Exit
 import qualified System.FilePath.Glob as Glob
 import           System.Process
@@ -82,18 +84,21 @@ main = do
       case result of
         Left _ -> die "Couldn't parse purify.yaml file."
         Right config -> do
-          command <- getArgs
-          case command of
-            [] -> purify [] config
-            ["build"] -> purify [] config
-            ["ide"] -> do
-              void (rawSystem
-                      "purs"
-                      ["ide","server", "--output-directory", ".purify-work/js-output"
-                      ,".purify-work/extra-deps/*/src/**/*.purs", "src/**/*.purs"])
-              pure ()
-            "add-deps":newDeps -> addDeps config newDeps
-            _ -> error "Unknown command"
+          args <- getArgs
+          if null args
+            then purify [] config False
+            else join $ fmap snd $ simpleOptions
+              $(simpleVersion Paths_purify.version)
+              "purify build tool for PureScript"
+              "Fully reproducible builds for PureScript"
+              (pure ()) $ do
+              addCommand "build" "Build code" id $ purify
+                  <$> pure []
+                  <*> pure config
+              addCommand "ide" "Launch IDE interaction" id $ pure ide
+              addCommand "add-deps" "Add dependencies to purify.yaml" id $ addDeps
+                  <$> pure config
+                  <*> some (strArgument (metavar "PACKAGE-NAME"))
 
 data FetchState = Didn'tFetch | Fetched
 
@@ -225,6 +230,13 @@ purify inputFiles config = do
             _ -> putStrLn ("Output bundled to " ++ outputFile config)
   where
     getDepDir dep = ".purify-work/extra-deps/" ++ depName dep
+
+ide :: IO ()
+ide = rawSystem
+  "purs"
+  ["ide","server", "--output-directory", ".purify-work/js-output"
+  ,".purify-work/extra-deps/*/src/**/*.purs", "src/**/*.purs"]
+  >>= exitWith
 
 addDeps :: Purify -> [String] -> IO ()
 addDeps (Purify outFile deps) newDeps =

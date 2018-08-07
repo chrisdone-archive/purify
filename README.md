@@ -1,4 +1,4 @@
-# DEPRECATED
+# DEPRECATED :warning: 
 
 See [psc-package](https://github.com/purescript/psc-package) which provides the same functionality and is updated regularly.
 
